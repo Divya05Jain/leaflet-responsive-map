@@ -168,7 +168,7 @@
           currentPolygon.bindPopup(`Polygon Area: ${areaInHectares} hectares`).openPopup();
         }
 
-        // Clear points and lines for the next polygon
+        // Clear points and lines for the next polygon.
         capturedPoints = [];
         lines.forEach(line => map.removeLayer(line));
         lines = [];
