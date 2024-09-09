@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Leaflet Polygon with Undo/Redo</title>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+
+  <!-- Add Turf.js for area calculation -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Turf.js/5.1.6/turf.min.js"></script>
+
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+    }
+    #map {
+      height: 100%;
+      width: 100%;
+    }
+    #captureBtn, #completePolygonBtn, #undoBtn, #redoBtn {
+      position: absolute;
+      top: 90%;
+      z-index: 1001;
+      padding: 10px;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    #captureBtn {
+      left: 20px;
+    }
+    #completePolygonBtn {
+      left: 150px;
+    }
+    #undoBtn {
+      left: 290px;
+    }
+    #redoBtn {
+      left: 350px;
+    }
+    #captureBtn:hover, #completePolygonBtn:hover, #undoBtn:hover, #redoBtn:hover {
+      background-color: #0056b3;
+    }
+    #custom-pointer {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 1000;
+      pointer-events: none;
+      width: 40px; /* Adjust width as needed */
+      height: 40px; /* Adjust height as needed */
+    }
+    #custom-pointer img {
+      width: 100%;
+      height: 100%;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <button id="captureBtn">Capture Position</button>
+  <button id="completePolygonBtn">Complete Polygon</button>
+  <button id="undoBtn">Undo</button>
+  <button id="redoBtn">Redo</button>
+  <div id="custom-pointer">
+    <!-- Replace 'path/to/your/image.png' with the path to your custom image -->
+    <img src="transparent-background-rem.png" alt="Pointer">
+  </div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+  <script>
+    // Initialize the map
+    const map = L.map('map').setView([51.505, -0.09], 13);
+
+    // Add Esri's satellite tile layer
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{x}/{y}', {
+      attribution: '&copy; <a href="https://www.esri.com">Esri</a> &mdash; Source: Esri, USGS, NOAA',
+      maxZoom: 18,
+    }).addTo(map);
+
+    // Variables for drawing and history
+    let capturedPoints = [];
+    let lines = [];
+    let undoStack = [];
+    let redoStack = [];
+    let currentPolygon = null; // Variable to hold the current polygon
+    const completedPolygons = []; // Array to store completed polygons
+
+    // Capture button event listener
+    document.getElementById('captureBtn').addEventListener('click', function () {
+      const mapCenter = map.getCenter();
+
+      if (capturedPoints.length > 0) {
+        const lastPoint = capturedPoints[capturedPoints.length - 1];
+        const line = L.polyline([lastPoint, mapCenter], { color: 'blue' }).addTo(map);
+        lines.push(line);
+      }
+
+      capturedPoints.push(mapCenter);
+      undoStack.push([...capturedPoints]); // Save state for undo
+      redoStack = []; // Clear redo stack after new action
+
+      updatePolygon();
+      map.on('move', updateLines);
+    });
+
+    // Update lines and polygon when the map moves
+    function updateLines() {
+      const mapCenter = map.getCenter();
+      lines.forEach(line => map.removeLayer(line)); // Remove old lines
+
+      for (let i = 0; i < capturedPoints.length - 1; i++) {
+        const line = L.polyline([capturedPoints[i], capturedPoints[i + 1]], { color: 'blue' }).addTo(map);
+        lines.push(line);
+      }
+
+      if (capturedPoints.length > 0) {
+        const lastPoint = capturedPoints[capturedPoints.length - 1];
+        const line = L.polyline([lastPoint, mapCenter], { color: 'red' }).addTo(map);
+        lines.push(line);
+      }
+    }
+
+    // Function to update or create the polygon
+    function updatePolygon() {
+      if (currentPolygon) {
+        map.removeLayer(currentPolygon); // Remove the old polygon being drawn
+      }
+
+      if (capturedPoints.length > 2) {
+        currentPolygon = L.polygon(capturedPoints, { color: 'blue', fillColor: '#ADD8E6', fillOpacity: 0.3 }).addTo(map);
+      }
+    }
+
+    // Complete polygon button event listener
+    document.getElementById('completePolygonBtn').addEventListener('click', function () {
+      if (capturedPoints.length > 2) {
+        if (currentPolygon) {
+          currentPolygon.setStyle({
+            color: 'green',
+            fillColor: '#00FF00',
+            fillOpacity: 0.5
+          });
+          completedPolygons.push(currentPolygon); // Save the completed polygon
+
+          // Calculate the area of the polygon using turf.js
+          const geojsonPolygon = {
+            "type": "Feature",
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [capturedPoints.map(point => [point.lng, point.lat])], // lng, lat format for Turf.js
+            }
+          };
+          
+          // Calculate area in square meters and convert to hectares
+          const area = turf.area(geojsonPolygon);
+          const areaInHectares = (area / 10000).toFixed(2);
+
+          // Update the polygon's popup
+          currentPolygon.bindPopup(`Polygon Area: ${areaInHectares} hectares`).openPopup();
+        }
+
+        // Clear points and lines for the next polygon
+        capturedPoints = [];
+        lines.forEach(line => map.removeLayer(line));
+        lines = [];
+        undoStack = []; // Clear undo stack after completing a polygon
+        redoStack = [];
+        currentPolygon = null; // Clear the current polygon
+      } else {
+        alert('You need at least 3 points to complete a polygon.');
+      }
+    });
+
+    // Undo button event listener
+    document.getElementById('undoBtn').addEventListener('click', function () {
+      if (undoStack.length > 1) {
+        redoStack.push(undoStack.pop()); // Move the last state to redo stack
+        capturedPoints = undoStack[undoStack.length - 1];
+        redraw();
+      } else {
+        alert('No more actions to undo.');
+      }
+    });
+
+    // Redo button event listener
+    document.getElementById('redoBtn').addEventListener('click', function () {
+      if (redoStack.length > 0) {
+        const redoState = redoStack.pop();
+        undoStack.push(redoState); // Push redo state back to undo stack
+        capturedPoints = redoState;
+        redraw();
+      } else {
+        alert('No more actions to redo.');
+      }
+    });
+
+    // Redraw lines and polygon after undo or redo
+    function redraw() {
+      lines.forEach(line => map.removeLayer(line)); // Clear previous lines
+      lines = [];
+      updatePolygon(); // Redraw the current polygon being drawn
+    }
+  </script>
+</body>
+</html>
